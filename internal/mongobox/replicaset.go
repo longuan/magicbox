@@ -18,7 +18,7 @@ type ReplicaSet struct {
 
 var startPort = 45000
 
-func NewReplicaSet(mongod, repl string, memNum uint8) (*ReplicaSet, error) {
+func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*ReplicaSet, error) {
 	r := &ReplicaSet{
 		mongod:   mongod,
 		replName: repl,
@@ -26,7 +26,7 @@ func NewReplicaSet(mongod, repl string, memNum uint8) (*ReplicaSet, error) {
 
 	for i := 0; i < int(memNum); i++ {
 		host := fmt.Sprintf("127.0.0.1:%d", startPort)
-		err := newMongod(mongod, r.replName, startPort)
+		err := newMongod(mongod, r.replName, startPort, role)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", host)
 		}
@@ -73,10 +73,6 @@ func (r *ReplicaSet) initiate() error {
 		return errors.Wrapf(err, "replSetInitiate error config is %s", config)
 	}
 	return nil
-}
-
-func (*ReplicaSet) Add() {
-
 }
 
 func (r *ReplicaSet) PrettyPrint() {
