@@ -32,6 +32,7 @@ func newMongod(mongod string, replName string, port int, role MongodRole) error 
 		return errors.Wrapf(err, "mkdir for %s error", dbDir)
 	}
 	args := []string{}
+	args = append(args, "--bind_ip_all")
 	args = append(args, "--dbpath")
 	args = append(args, dbDir)
 	args = append(args, "--port")
