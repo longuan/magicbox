@@ -25,7 +25,7 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	}
 
 	// 创建configsvrs
-	replName := fmt.Sprintf("%s-cfgsvr", clsName)
+	replName := genCfgName(clsName)
 	rs, err := NewReplicaSet(mongod, replName, mongodNum, RoleConfigSvr)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "creating cfgsvr %s error", replName)
@@ -55,7 +55,7 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	defer cli.Disconnect(context.Background())
 
 	for i := 0; i < int(shardNum); i++ {
-		replName := fmt.Sprintf("%s-%d", clsName, i)
+		replName := genRsName(clsName, uint8(i))
 		rs, err := NewReplicaSet(mongod, replName, mongodNum, RoleShardSvr)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "creating replicaset %s error", replName)
@@ -69,4 +69,12 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 		ss.shards = append(ss.shards, rs)
 	}
 	return ss, nil
+}
+
+func genRsName(cls string, i uint8) string {
+	return fmt.Sprintf("%s-rs_%d", cls, i)
+}
+
+func genCfgName(cls string) string {
+	return fmt.Sprintf("%s-cfgsvr", cls)
 }

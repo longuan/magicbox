@@ -12,6 +12,8 @@ type fixedThreadPool struct {
 	running   int32
 }
 
+var _ Executor = (*fixedThreadPool)(nil)
+
 // NewFixedPool 创建一个固定大小的"thread pool"
 func NewFixedPool(n uint32) *fixedThreadPool {
 	ftp := &fixedThreadPool{

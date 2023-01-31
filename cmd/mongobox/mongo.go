@@ -2,17 +2,27 @@ package main
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/longuan/magicbox/internal/mongobox"
+	"github.com/spf13/cobra"
+
+	"github.com/longuan/magicbox/cmd/mongobox/commands"
 )
 
-func main() {
-	// mongodPath := "/home/longanliu/code/github.com/mongodb/mongo-v4.2/mongod" // 使用环境变量中的mongod
+var rootCmd = cobra.Command{
+	Use:     "mongobox",
+	Short:   "mongobox is a tool for creating mongodb cluster quickly",
+	Version: "v0.0.1",
+	Args:    cobra.ExactArgs(1),
+}
 
-	// repl, err := mongobox.NewReplicaSet(mongodPath, "rs0", 1, mongobox.RoleReplica)
-	_, err := mongobox.NewShardSet("mongos", "mongod", "test", 2, 3, 3)
-	if err != nil {
+func init() {
+	rootCmd.AddCommand(&commands.CreateCmd)
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
-		return
+		os.Exit(1)
 	}
 }

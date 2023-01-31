@@ -2,8 +2,8 @@ package executor
 
 import "context"
 
-type executor interface {
-	Submit()
+type Executor interface {
+	Submit(t task)
 	SubmitFunc(f func())
 	Wait(context.Context) error
 }

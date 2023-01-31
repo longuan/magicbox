@@ -3,6 +3,11 @@ package mongobox
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"path"
+	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -24,9 +29,21 @@ func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*Replica
 		replName: repl,
 	}
 
+	replDbDir := fmt.Sprintf("/tmp/dbfiles-%s", r.replName)
+	err := os.Mkdir(replDbDir, os.ModePerm)
+	if err != nil {
+		return nil, errors.Wrapf(err, "mkdir for %s error", replDbDir)
+	}
+
 	for i := 0; i < int(memNum); i++ {
+		for !portIsAvailable(startPort) {
+			startPort += 2
+		}
+
 		host := fmt.Sprintf("127.0.0.1:%d", startPort)
-		err := newMongod(mongod, r.replName, startPort, role)
+		dbPath := path.Join(replDbDir, strconv.Itoa(startPort))
+		logFile := path.Join(replDbDir, fmt.Sprintf("mongod-%d.log", startPort))
+		err := newMongod(mongod, r.replName, dbPath, logFile, startPort, role)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", host)
 		}
@@ -34,7 +51,7 @@ func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*Replica
 		r.members = append(r.members, host)
 	}
 
-	err := r.initiate()
+	err = r.initiate()
 	if err != nil {
 		return nil, err
 	}
@@ -78,4 +95,16 @@ func (r *ReplicaSet) initiate() error {
 func (r *ReplicaSet) PrettyPrint() {
 	fmt.Println("members: ")
 	fmt.Println("    ", r.members)
+}
+
+func portIsAvailable(port int) bool {
+	timeout := time.Second
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)), timeout)
+	if err != nil {
+		return true
+	}
+	if conn != nil {
+		defer conn.Close()
+	}
+	return false
 }
