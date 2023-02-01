@@ -23,7 +23,19 @@ type ReplicaSet struct {
 
 var startPort = 45000
 
-func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*ReplicaSet, error) {
+func NewReplicaSet(mongod, repl string, memNum uint8, hidden bool) (*ReplicaSet, error) {
+	return newRs(mongod, repl, memNum, hidden, roleReplica)
+}
+
+func newShard(mongod, repl string, memNum uint8, hidden bool) (*ReplicaSet, error) {
+	return newRs(mongod, repl, memNum, hidden, roleShardSvr)
+}
+
+func newRs(mongod, repl string, memNum uint8, hidden bool, role mongodRole) (*ReplicaSet, error) {
+	if hidden && memNum < 3 {
+		return nil, errors.New("members number should greate than 3 if setting hidden")
+	}
+
 	r := &ReplicaSet{
 		mongod:   mongod,
 		replName: repl,
@@ -43,7 +55,7 @@ func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*Replica
 		host := fmt.Sprintf("127.0.0.1:%d", startPort)
 		dbPath := path.Join(replDbDir, strconv.Itoa(startPort))
 		logFile := path.Join(replDbDir, fmt.Sprintf("mongod-%d.log", startPort))
-		err := newMongod(mongod, r.replName, dbPath, logFile, startPort, role)
+		err := newMongodProcess(mongod, r.replName, dbPath, logFile, startPort, role)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", host)
 		}
@@ -51,7 +63,7 @@ func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*Replica
 		r.members = append(r.members, host)
 	}
 
-	err = r.initiate()
+	err = r.initiate(hidden)
 	if err != nil {
 		return nil, err
 	}
@@ -59,13 +71,20 @@ func NewReplicaSet(mongod, repl string, memNum uint8, role MongodRole) (*Replica
 	return r, nil
 }
 
-func (r *ReplicaSet) initiate() error {
+func (r *ReplicaSet) initiate(hidden bool) error {
 	members := bson.A{}
 	for i, memb := range r.members {
-		members = append(members, bson.D{
+		membConfig := bson.D{
 			{"_id", i},
 			{"host", memb},
-		})
+		}
+
+		if hidden && i == len(r.members)-1 {
+			membConfig = append(membConfig, bson.E{"priority", 0})
+			membConfig = append(membConfig, bson.E{"hidden", true})
+		}
+
+		members = append(members, membConfig)
 	}
 
 	config := bson.D{
@@ -94,7 +113,9 @@ func (r *ReplicaSet) initiate() error {
 
 func (r *ReplicaSet) PrettyPrint() {
 	fmt.Println("members: ")
-	fmt.Println("    ", r.members)
+	for _, mongod := range r.members {
+		fmt.Println("  ", mongod)
+	}
 }
 
 func portIsAvailable(port int) bool {

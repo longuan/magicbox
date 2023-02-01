@@ -27,6 +27,15 @@ create test-cls -s --shard 2
 			fmt.Println(err)
 			return
 		}
+		hidden, err := cmd.Flags().GetBool("hidden")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		if hidden && member < 3 {
+			fmt.Println("member should greate than 3 if setting hidden")
+			return
+		}
 		shardNum, err := cmd.Flags().GetUint8("shard")
 		if err != nil {
 			fmt.Println(err)
@@ -43,13 +52,13 @@ create test-cls -s --shard 2
 			return
 		}
 		if isShardSet {
-			_, err = mongobox.NewShardSet(mongos, mongod, args[0], shardNum, 1, member)
+			_, err = mongobox.NewShardSet(mongos, mongod, args[0], shardNum, 1, member, hidden)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 		} else {
-			_, err = mongobox.NewReplicaSet(mongod, args[0], member, mongobox.RoleReplica)
+			_, err = mongobox.NewReplicaSet(mongod, args[0], member, hidden)
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -64,4 +73,5 @@ func init() {
 	CreateCmd.Flags().Uint8("shard", 2, "shard number for shard set")
 	CreateCmd.Flags().String("mongod", "mongod", "mongod binary file path, default is 'mongod' system command")
 	CreateCmd.Flags().String("mongos", "mongos", "mongos binary file path, default is 'mongos' system command")
+	CreateCmd.Flags().Bool("hidden", false, "create a replica set with a hidden member. need member>=3 ")
 }
