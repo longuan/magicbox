@@ -60,7 +60,7 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 		if err != nil {
 			return nil, errors.WithMessagef(err, "creating replicaset %s error", replName)
 		}
-		shardStr := replName + "/" + strings.Join(rs.members, ",")
+		shardStr := replName + "/" + strings.Join(rs.seeds, ",")
 		var doc bson.M
 		err = cli.Database("admin").RunCommand(context.Background(), bson.M{"addShard": shardStr}).Decode(&doc)
 		if err != nil {

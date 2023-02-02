@@ -19,6 +19,7 @@ type ReplicaSet struct {
 	mongod   string
 	replName string
 	members  []string
+	seeds    []string
 }
 
 var startPort = 45000
@@ -54,8 +55,12 @@ func newRs(mongod, repl string, memNum uint8, hidden bool, role mongodRole) (*Re
 
 		host := fmt.Sprintf("127.0.0.1:%d", startPort)
 		dbPath := path.Join(replDbDir, strconv.Itoa(startPort))
+		err := os.Mkdir(dbPath, os.ModePerm)
+		if err != nil {
+			return nil, errors.Wrapf(err, "mkdir for %s error", replDbDir)
+		}
 		logFile := path.Join(replDbDir, fmt.Sprintf("mongod-%d.log", startPort))
-		err := newMongodProcess(mongod, r.replName, dbPath, logFile, startPort, role)
+		err = newMongodProcess(mongod, r.replName, dbPath, logFile, startPort, role)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", host)
 		}
@@ -82,6 +87,8 @@ func (r *ReplicaSet) initiate(hidden bool) error {
 		if hidden && i == len(r.members)-1 {
 			membConfig = append(membConfig, bson.E{"priority", 0})
 			membConfig = append(membConfig, bson.E{"hidden", true})
+		} else {
+			r.seeds = append(r.seeds, memb)
 		}
 
 		members = append(members, membConfig)
