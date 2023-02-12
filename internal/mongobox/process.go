@@ -8,18 +8,14 @@ import (
 	"github.com/longuan/magicbox/pkg/sys"
 )
 
-type mongodRole uint8
+type localProcessProvider struct {
+}
 
-const (
-	roleUnknown mongodRole = iota
-	roleStandAlone
-	roleConfigSvr
-	roleShardSvr
-	roleReplica
-)
+var _ mongoProvider = (*localProcessProvider)(nil)
 
-// newMongod 创建一个本地的mongod进程
-func newMongodProcess(mongod, replName, dbPath, logFile string, port int, role mongodRole) error {
+// StartMongod 创建一个本地的mongod进程
+func (l *localProcessProvider) StartMongod(binaryPath, rsName, dbPath, logFile string, port uint16,
+	role mongodRole) error {
 	if role == roleUnknown || role == roleStandAlone {
 		return errors.Errorf("not support")
 	}
@@ -33,7 +29,7 @@ func newMongodProcess(mongod, replName, dbPath, logFile string, port int, role m
 	args = append(args, "--logpath")
 	args = append(args, logFile)
 	args = append(args, "--replSet")
-	args = append(args, replName)
+	args = append(args, rsName)
 	args = append(args, "--fork")
 
 	if role == roleConfigSvr {
@@ -42,26 +38,34 @@ func newMongodProcess(mongod, replName, dbPath, logFile string, port int, role m
 		args = append(args, "--shardsvr")
 	}
 
-	err := sys.NewProcess(mongod, args)
+	err := sys.NewProcess(binaryPath, args)
 	if err != nil {
-		return errors.Wrapf(err, "sys.NewProcess %s %v error", mongod, args)
+		return errors.Wrapf(err, "sys.NewProcess %s %v error", binaryPath, args)
 	}
 	return nil
 }
 
-//  configStr形如 <config replset name>/<host1:port>,<host2:port>
-func newMongosProcess(mongos string, port int, configStr string) error {
+// StartMongos 创建一个本地的mongos进程
+func (l *localProcessProvider) StartMongos(binaryPath, configRs string, configs []HostAndPort, port uint16) error {
 	args := []string{}
 	args = append(args, "--port")
 	args = append(args, fmt.Sprintf("%d", port))
 	args = append(args, "--logpath")
 	args = append(args, fmt.Sprintf("/tmp/mongos-%d.log", port))
 	args = append(args, "--configdb")
-	args = append(args, configStr)
+	args = append(args, ConnStringForRs(configRs, configs))
 	args = append(args, "--fork")
-	err := sys.NewProcess(mongos, args)
+	err := sys.NewProcess(binaryPath, args)
 	if err != nil {
-		return errors.Wrapf(err, "sys.NewProcess %s %v error", mongos, args)
+		return errors.Wrapf(err, "sys.NewProcess %s %v error", binaryPath, args)
 	}
+	return nil
+}
+
+func (l *localProcessProvider) StopMongod() error {
+	return nil
+}
+
+func (l *localProcessProvider) StopMongos() error {
 	return nil
 }

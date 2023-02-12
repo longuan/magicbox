@@ -3,7 +3,6 @@ package mongobox
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -12,38 +11,39 @@ import (
 )
 
 type ShardSet struct {
-	mongoss   []string
-	configsvr *ReplicaSet
-	shards    []*ReplicaSet
+	mongoss   []HostAndPort
+	configsvr ReplicaSet
+	shards    []ReplicaSet
+	provider  mongoProvider
 }
 
 // NewShardSet 创建一个分片集群
 func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum uint8, hidden bool) (*ShardSet, error) {
 	ss := &ShardSet{
-		mongoss: make([]string, 0),
-		shards:  make([]*ReplicaSet, 0),
+		mongoss:  make([]HostAndPort, 0),
+		shards:   make([]ReplicaSet, 0),
+		provider: &localProcessProvider{}, // 默认使用local process provider
 	}
 
 	// 创建configsvrs
 	replName := genCfgName(clsName)
-	rs, err := newRs(mongod, replName, mongodNum, hidden, roleConfigSvr)
+	configRs, err := newCfgsvr(mongod, replName, mongodNum, hidden)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "creating cfgsvr %s error", replName)
 	}
-	ss.configsvr = rs
-	configStr := replName + "/" + strings.Join(rs.members, ",")
+	ss.configsvr = configRs
 
 	// 启动mongos
 	for i := 0; i < int(mongosNum); i++ {
-		err = newMongosProcess(mongos, startPort, configStr)
+		err = ss.provider.StartMongos(mongos, replName, configRs.Members(), startPort)
 		if err != nil {
 			return nil, errors.WithMessage(err, "creating mongos error")
 		}
-		ss.mongoss = append(ss.mongoss, fmt.Sprintf("127.0.0.1:%d", startPort))
+		ss.mongoss = append(ss.mongoss, HostAndPort{"127.0.0.1", startPort})
 		startPort++
 	}
 
-	cliOpts := options.Client().SetHosts([]string{ss.mongoss[0]})
+	cliOpts := options.Client().SetHosts([]string{ss.mongoss[0].Address()})
 	cli, err := mongo.NewClient(cliOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "mongo.NewClient error")
@@ -60,11 +60,10 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 		if err != nil {
 			return nil, errors.WithMessagef(err, "creating replicaset %s error", replName)
 		}
-		shardStr := replName + "/" + strings.Join(rs.seeds, ",")
 		var doc bson.M
-		err = cli.Database("admin").RunCommand(context.Background(), bson.M{"addShard": shardStr}).Decode(&doc)
+		err = cli.Database("admin").RunCommand(context.Background(), bson.M{"addShard": rs.ConnString()}).Decode(&doc)
 		if err != nil {
-			return nil, errors.Wrapf(err, "addShard %s error", shardStr)
+			return nil, errors.Wrapf(err, "addShard %s error", rs.ConnString())
 		}
 		ss.shards = append(ss.shards, rs)
 	}
@@ -77,12 +76,12 @@ func (ss *ShardSet) PrettyPrint() {
 		fmt.Println("  ", mongos)
 	}
 	fmt.Println("cfgsvr:")
-	for _, cfgsvr := range ss.configsvr.members {
+	for _, cfgsvr := range ss.configsvr.Members() {
 		fmt.Println("  ", cfgsvr)
 	}
 	for _, shard := range ss.shards {
-		fmt.Println(shard.replName, ":")
-		for _, mongod := range shard.members {
+		fmt.Println(shard.RsName(), ":")
+		for _, mongod := range shard.Members() {
 			fmt.Println("  ", mongod)
 		}
 	}
