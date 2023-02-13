@@ -23,7 +23,12 @@ type ReplicaSet interface {
 }
 
 func NewReplicaSet(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, error) {
-	return newRs(mongod, repl, memNum, hidden, roleReplica)
+	rs, err := newRs(mongod, repl, memNum, hidden, roleReplica)
+	if err != nil {
+		return nil, errors.WithMessage(err, "new rs")
+	}
+	err = rs.Init()
+	return rs, err
 }
 
 func newShard(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, error) {
@@ -36,9 +41,9 @@ func newCfgsvr(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, erro
 
 func newRs(mongod, repl string, memNum uint8, hidden bool, role mongodRole) (ReplicaSet, error) {
 	if hidden {
-		return newReplicaSetWithHidden(mongod, repl, memNum, role)
+		return newReplicaSetWithHidden(mongod, repl, memNum, role, &localProcessProvider{})
 	} else {
-		return newPureReplicaSet(mongod, repl, memNum, role)
+		return newPureReplicaSet(mongod, repl, memNum, role, &localProcessProvider{})
 	}
 }
 
@@ -50,11 +55,12 @@ type pureReplicaSet struct {
 
 var _ ReplicaSet = (*pureReplicaSet)(nil)
 
-func newPureReplicaSet(mongod, repl string, memNum uint8, role mongodRole) (*pureReplicaSet, error) {
+func newPureReplicaSet(mongod, repl string, memNum uint8, role mongodRole, p mongoProvider) (
+	*pureReplicaSet, error) {
 	r := &pureReplicaSet{
 		replName: repl,
 		members:  make([]HostAndPort, 0),
-		provider: &localProcessProvider{},
+		provider: p,
 	}
 
 	replDbDir := fmt.Sprintf("/tmp/dbfiles-%s", r.replName)
@@ -139,12 +145,13 @@ type replicaSetWithHidden struct {
 
 var _ ReplicaSet = (*replicaSetWithHidden)(nil)
 
-func newReplicaSetWithHidden(mongod, repl string, memNum uint8, role mongodRole) (*replicaSetWithHidden, error) {
+func newReplicaSetWithHidden(mongod, repl string, memNum uint8, role mongodRole, p mongoProvider) (
+	*replicaSetWithHidden, error) {
 	if memNum < 3 {
 		return nil, errors.New("members number should greate than 3 if setting hidden")
 	}
 
-	pr, err := newPureReplicaSet(mongod, repl, memNum, role)
+	pr, err := newPureReplicaSet(mongod, repl, memNum, role, p)
 	if err != nil {
 		return nil, err
 	}

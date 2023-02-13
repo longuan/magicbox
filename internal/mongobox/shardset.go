@@ -29,9 +29,13 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	replName := genCfgName(clsName)
 	configRs, err := newCfgsvr(mongod, replName, mongodNum, hidden)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "creating cfgsvr %s error", replName)
+		return nil, errors.WithMessagef(err, "new cfgsvr %s error", replName)
 	}
 	ss.configsvr = configRs
+	err = ss.configsvr.Init()
+	if err != nil {
+		return nil, errors.WithMessagef(err, "init cfgsvr %s error", replName)
+	}
 
 	// 启动mongos
 	for i := 0; i < int(mongosNum); i++ {
@@ -58,7 +62,11 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 		replName := genRsName(clsName, uint8(i))
 		rs, err := newShard(mongod, replName, mongodNum, hidden)
 		if err != nil {
-			return nil, errors.WithMessagef(err, "creating replicaset %s error", replName)
+			return nil, errors.WithMessagef(err, "new shard %s error", replName)
+		}
+		err = rs.Init()
+		if err != nil {
+			return nil, errors.WithMessagef(err, "init shard %s error", replName)
 		}
 		var doc bson.M
 		err = cli.Database("admin").RunCommand(context.Background(), bson.M{"addShard": rs.ConnString()}).Decode(&doc)
