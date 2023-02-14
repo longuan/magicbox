@@ -9,9 +9,8 @@ import (
 
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/longuan/magicbox/pkg/mongo"
 	"github.com/longuan/magicbox/pkg/sys"
 )
 
@@ -84,19 +83,19 @@ func newPureReplicaSet(mongod, repl string, memNum uint8, role mongodRole, p mon
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", repl)
 		}
-		startPort++
 		r.members = append(r.members, HostAndPort{"127.0.0.1", startPort})
+		startPort++
 	}
 
 	return r, nil
 }
 
-func (r *pureReplicaSet) Init() error {
+func (r *pureReplicaSet) generateRsConf() bson.D {
 	members := bson.A{}
 	for i, memb := range r.members {
 		membConfig := bson.D{
 			{"_id", i},
-			{"host", memb},
+			{"host", memb.Address()},
 		}
 
 		members = append(members, membConfig)
@@ -106,24 +105,16 @@ func (r *pureReplicaSet) Init() error {
 		{"_id", r.replName},
 		{"members", members},
 	}
+	return config
+}
 
-	cliOpts := options.Client().SetHosts([]string{r.members[0].Address()}).SetDirect(true)
-	cli, err := mongo.NewClient(cliOpts)
+func (r *pureReplicaSet) Init() error {
+	cli, err := mongo.ConnectServer(r.members[0].Address())
 	if err != nil {
-		return errors.Wrap(err, "mongo.NewClient error")
+		return err
 	}
-	err = cli.Connect(context.Background())
-	if err != nil {
-		return errors.Wrap(err, "cli.Connect error")
-	}
-	defer cli.Disconnect(context.Background())
-
-	var doc bson.M
-	err = cli.Database("admin").RunCommand(context.Background(), bson.M{"replSetInitiate": config}).Decode(&doc)
-	if err != nil {
-		return errors.Wrapf(err, "replSetInitiate error config is %s", config)
-	}
-	return nil
+	defer cli.Close()
+	return cli.RsInit(context.Background(), r.generateRsConf())
 }
 
 func (r *pureReplicaSet) RsName() string {
@@ -139,7 +130,7 @@ func (r *pureReplicaSet) ConnString() string {
 }
 
 type replicaSetWithHidden struct {
-	pr    *pureReplicaSet
+	*pureReplicaSet
 	seeds []HostAndPort
 }
 
@@ -156,25 +147,25 @@ func newReplicaSetWithHidden(mongod, repl string, memNum uint8, role mongodRole,
 		return nil, err
 	}
 	r := &replicaSetWithHidden{
-		pr:    pr,
-		seeds: make([]HostAndPort, 0),
+		pureReplicaSet: pr,
+		seeds:          make([]HostAndPort, 0),
 	}
 
 	for i := 0; i < int(memNum); i++ {
 		if i != int(memNum) {
-			r.seeds = append(r.seeds, r.pr.members[i])
+			r.seeds = append(r.seeds, r.members[i])
 		}
 	}
 
 	return r, nil
 }
 
-func (r *replicaSetWithHidden) Init() error {
+func (r *replicaSetWithHidden) generateRsConf() bson.D {
 	members := bson.A{}
-	for i, memb := range r.pr.members {
+	for i, memb := range r.members {
 		membConfig := bson.D{
 			{"_id", i},
-			{"host", memb},
+			{"host", memb.Address()},
 		}
 
 		isSeed := false
@@ -195,37 +186,22 @@ func (r *replicaSetWithHidden) Init() error {
 	}
 
 	config := bson.D{
-		{"_id", r.pr.replName},
+		{"_id", r.replName},
 		{"members", members},
 	}
 
-	cliOpts := options.Client().SetHosts([]string{r.seeds[0].Address()}).SetDirect(true)
-	cli, err := mongo.NewClient(cliOpts)
-	if err != nil {
-		return errors.Wrap(err, "mongo.NewClient error")
-	}
-	err = cli.Connect(context.Background())
-	if err != nil {
-		return errors.Wrap(err, "cli.Connect error")
-	}
-	defer cli.Disconnect(context.Background())
-
-	var doc bson.M
-	err = cli.Database("admin").RunCommand(context.Background(), bson.M{"replSetInitiate": config}).Decode(&doc)
-	if err != nil {
-		return errors.Wrapf(err, "replSetInitiate error config is %s", config)
-	}
-	return nil
+	return config
 }
 
-func (r *replicaSetWithHidden) RsName() string {
-	return r.pr.RsName()
-}
-
-func (r *replicaSetWithHidden) Members() []HostAndPort {
-	return r.pr.Members()
+func (r *replicaSetWithHidden) Init() error {
+	cli, err := mongo.ConnectServer(r.members[0].Address())
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+	return cli.RsInit(context.Background(), r.generateRsConf())
 }
 
 func (r *replicaSetWithHidden) ConnString() string {
-	return ConnStringForRs(r.pr.RsName(), r.seeds)
+	return ConnStringForRs(r.RsName(), r.seeds)
 }
