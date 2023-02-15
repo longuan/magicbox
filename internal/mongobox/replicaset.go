@@ -40,9 +40,9 @@ func newCfgsvr(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, erro
 
 func newRs(mongod, repl string, memNum uint8, hidden bool, role mongodRole) (ReplicaSet, error) {
 	if hidden {
-		return newReplicaSetWithHidden(mongod, repl, memNum, role, &localProcessProvider{})
+		return newReplicaSetWithHidden(mongod, repl, memNum, role, getProvider())
 	} else {
-		return newPureReplicaSet(mongod, repl, memNum, role, &localProcessProvider{})
+		return newPureReplicaSet(mongod, repl, memNum, role, getProvider())
 	}
 }
 

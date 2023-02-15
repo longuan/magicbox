@@ -22,7 +22,7 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	ss := &ShardSet{
 		mongoss:  make([]HostAndPort, 0),
 		shards:   make([]ReplicaSet, 0),
-		provider: &localProcessProvider{}, // 默认使用local process provider
+		provider: getProvider(),
 	}
 
 	// 创建configsvrs

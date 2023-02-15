@@ -1,7 +1,11 @@
 package mongobox
 
 import (
+	"context"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
@@ -98,10 +102,98 @@ func (l *localProcessProvider) StartMongos(binaryPath, configRs string, configs 
 	return nil
 }
 
-func (l *localProcessProvider) StopMongod() error {
+func (l *localProcessProvider) StopMongod(cluster string) error {
+	getPidCmd := fmt.Sprintf("ps -ef | awk '/[-]-replSet %s-/{print $2}'", cluster)
+	out, err := sys.RunCommand(getPidCmd)
+	if err != nil {
+		return errors.WithMessagef(err, "run command %s error", getPidCmd)
+	}
+	outStr := string(out)
+	pidStrs := strings.Split(strings.TrimSpace(outStr), "\n")
+	pids := make([]int, 0)
+	for _, s := range pidStrs {
+		p, err := strconv.Atoi(s)
+		if err != nil {
+			return errors.Wrapf(err, "strconv %s error", s)
+		}
+		pids = append(pids, p)
+	}
+
+	for _, pid := range pids {
+		getCmdlineCmd := fmt.Sprintf("ps -p %d -o cmd=", pid)
+		out, err = sys.RunCommand(getCmdlineCmd)
+		if err != nil {
+			return errors.WithMessagef(err, "run command %s error", getCmdlineCmd)
+		}
+		cmdStrs := strings.Split(strings.TrimSpace(string(out)), " ")
+		flagset := defaultMongodFlagSet()
+		err = flagset.Parse(cmdStrs[1:])
+		if err != nil {
+			return errors.Wrapf(err, "flagset mongod parse %s error", string(out))
+		}
+
+		waitCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		err = sys.StopProcess(waitCtx, pid)
+		if err != nil {
+			return errors.WithMessagef(err, "stop process %d error", pid)
+		}
+
+		dbDir, err := flagset.GetString("dbpath")
+		if err != nil {
+			return err
+		}
+		// TODO: 如果dbpath是相对路径，就要先获取进程的当前路径，然后拼成绝对路径
+		err = sys.RemoveDir(dbDir)
+		if err != nil {
+			return err
+		}
+
+		// TODO: 删除mongodb的logpath，要考虑到mongodb的日志rotating
+	}
+
 	return nil
 }
 
-func (l *localProcessProvider) StopMongos() error {
+func (l *localProcessProvider) StopMongos(cluster string) error {
+	getPidCmd := fmt.Sprintf("ps -ef | awk '/[-]-configdb %s\\//{print $2}'", genCfgName(cluster))
+	out, err := sys.RunCommand(getPidCmd)
+	if err != nil {
+		return errors.WithMessagef(err, "run command %s error", getPidCmd)
+	}
+	outStr := string(out)
+	pidStrs := strings.Split(strings.TrimSpace(outStr), "\n")
+	pids := make([]int, 0)
+	for _, s := range pidStrs {
+		p, err := strconv.Atoi(s)
+		if err != nil {
+			return errors.Wrapf(err, "strconv %s error", s)
+		}
+		pids = append(pids, p)
+	}
+
+	for _, pid := range pids {
+		getCmdlineCmd := fmt.Sprintf("ps -p %d -o cmd=", pid)
+		out, err = sys.RunCommand(getCmdlineCmd)
+		if err != nil {
+			return errors.WithMessagef(err, "run command %s error", getCmdlineCmd)
+		}
+		cmdStrs := strings.Split(strings.TrimSpace(string(out)), " ")
+		flagset := defaultMongosFlagSet()
+		err = flagset.Parse(cmdStrs[1:])
+		if err != nil {
+			return errors.Wrapf(err, "flagset mongos parse %s error", string(out))
+		}
+
+		waitCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		err = sys.StopProcess(waitCtx, pid)
+		if err != nil {
+			return errors.WithMessagef(err, "stop process %d error", pid)
+		}
+
+		// TODO: 删除mongodb的logpath，要考虑到mongodb的日志rotating
+	}
+
 	return nil
 }
