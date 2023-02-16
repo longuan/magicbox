@@ -103,13 +103,16 @@ func (l *localProcessProvider) StartMongos(binaryPath, configRs string, configs 
 }
 
 func (l *localProcessProvider) StopMongod(cluster string) error {
-	getPidCmd := fmt.Sprintf("ps -ef | awk '/[-]-replSet %s-/{print $2}'", cluster)
+	getPidCmd := fmt.Sprintf("ps -ef | awk '/[-]-replSet %s/{print $2}'", cluster)
 	out, err := sys.RunCommand(getPidCmd)
 	if err != nil {
 		return errors.WithMessagef(err, "run command %s error", getPidCmd)
 	}
-	outStr := string(out)
-	pidStrs := strings.Split(strings.TrimSpace(outStr), "\n")
+	outStr := strings.TrimSpace(string(out))
+	if outStr == "" {
+		return errors.Errorf("there is no mongod processes belong to %s", cluster)
+	}
+	pidStrs := strings.Split(outStr, "\n")
 	pids := make([]int, 0)
 	for _, s := range pidStrs {
 		p, err := strconv.Atoi(s)
@@ -161,8 +164,12 @@ func (l *localProcessProvider) StopMongos(cluster string) error {
 	if err != nil {
 		return errors.WithMessagef(err, "run command %s error", getPidCmd)
 	}
-	outStr := string(out)
-	pidStrs := strings.Split(strings.TrimSpace(outStr), "\n")
+	outStr := strings.TrimSpace(string(out))
+	if outStr == "" {
+		// 删除副本集也会调用此函数，所以这里不报错
+		return nil
+	}
+	pidStrs := strings.Split(outStr, "\n")
 	pids := make([]int, 0)
 	for _, s := range pidStrs {
 		p, err := strconv.Atoi(s)
