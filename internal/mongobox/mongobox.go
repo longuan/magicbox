@@ -13,8 +13,8 @@ const (
 )
 
 type mongoProvider interface {
-	StartMongod(binaryPath, rsName, dbPath, logFile string, port uint16, role mongodRole) error
-	StartMongos(binaryPath, configRs string, configs []HostAndPort, port uint16) error
+	StartMongod(binaryPath, rsName, dbPath, logFile, keyfile string, port uint16, role mongodRole) error
+	StartMongos(binaryPath, configRs, logFile string, configs []HostAndPort, port uint16) error
 	StopMongod(cluster string) error
 	StopMongos(cluster string) error
 }

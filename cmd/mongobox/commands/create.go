@@ -51,14 +51,45 @@ create test-cls -s --shard 2
 			fmt.Println(err)
 			return
 		}
+		keyfile, err := cmd.Flags().GetString("keyfile")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defaultMo := mongobox.MongodOption{
+			Mongod: mongod,
+		}
+
+		defaultRsOption := mongobox.RsOption{
+			Keyfile: keyfile,
+			Members: make([]mongobox.MongodOption, 0),
+		}
+		for i := 0; uint8(i) < member; i++ {
+			defaultRsOption.Members = append(defaultRsOption.Members, defaultMo.Dup())
+		}
+		if hidden {
+			defaultRsOption.Members[0].Hidden = true
+		}
+
 		if isShardSet {
-			_, err = mongobox.NewShardSet(mongos, mongod, args[0], shardNum, 1, member, hidden)
+			ssoOption := mongobox.ShardSetOption{
+				ConfigSvrOption: defaultRsOption.Dup(),
+				ShardOptions:    make([]mongobox.RsOption, 0),
+				MongosOption:    make([]mongobox.MongosOption, 0),
+			}
+			for i := 0; i < int(shardNum); i++ {
+				ssoOption.ShardOptions = append(ssoOption.ShardOptions, defaultRsOption.Dup())
+			}
+			ssoOption.MongosOption = append(ssoOption.MongosOption, mongobox.MongosOption{
+				Mongos: mongos,
+			})
+			_, err = mongobox.NewShardSet(args[0], ssoOption)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 		} else {
-			_, err = mongobox.NewReplicaSet(mongod, args[0], member, hidden)
+			_, err = mongobox.NewReplicaSet(args[0], defaultRsOption.Dup())
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -68,10 +99,11 @@ create test-cls -s --shard 2
 }
 
 func init() {
-	CreateCmd.Flags().BoolP("s", "s", false, "create a shard set if true")
+	CreateCmd.Flags().Bool("s", false, "create a shard set if true")
 	CreateCmd.Flags().Uint8("member", 3, "member number for each replica set")
 	CreateCmd.Flags().Uint8("shard", 2, "shard number for shard set")
 	CreateCmd.Flags().String("mongod", "mongod", "mongod binary file path, default is 'mongod' system command")
 	CreateCmd.Flags().String("mongos", "mongos", "mongos binary file path, default is 'mongos' system command")
 	CreateCmd.Flags().Bool("hidden", false, "create a replica set with a hidden member. need member>=3 ")
+	CreateCmd.Flags().String("keyfile", "", "create a cluster with keyfile. file path with file name")
 }

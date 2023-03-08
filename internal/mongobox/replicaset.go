@@ -14,6 +14,49 @@ import (
 	"github.com/longuan/magicbox/pkg/sys"
 )
 
+const defaultDbPathPrefix = "/tmp"
+
+type RsOption struct {
+	Keyfile string
+	Members []MongodOption
+}
+
+func (rp RsOption) Dup() RsOption {
+	return rp
+}
+
+func (rp RsOption) validate() error {
+	if len(rp.Members) == 0 {
+		return errors.New("at least one member")
+	}
+	hidden := 0
+	for _, mem := range rp.Members {
+		if mem.Mongod == "" {
+			return errors.New("mongod should be valid file path")
+		}
+		if mem.Hidden {
+			hidden++
+		}
+	}
+
+	if hidden > 1 {
+		return errors.New("only support one hidden")
+	}
+	if hidden > 0 && len(rp.Members) < 3 {
+		return errors.New("at least 3 members when having hidden")
+	}
+	return nil
+}
+
+type MongodOption struct {
+	Mongod string
+	Hidden bool
+}
+
+func (mo MongodOption) Dup() MongodOption {
+	return mo
+}
+
 type ReplicaSet interface {
 	Init() error
 	RsName() string
@@ -21,8 +64,15 @@ type ReplicaSet interface {
 	ConnString() string
 }
 
-func NewReplicaSet(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, error) {
-	rs, err := newRs(mongod, repl, memNum, hidden, roleReplica)
+func NewReplicaSet(repl string, rp RsOption) (ReplicaSet, error) {
+	if repl == "" {
+		return nil, errors.New("repl should be empty")
+	}
+	err := rp.validate()
+	if err != nil {
+		return nil, err
+	}
+	rs, err := newPureReplicaSet(repl, rp, roleReplica, getProvider())
 	if err != nil {
 		return nil, errors.WithMessage(err, "new rs")
 	}
@@ -30,45 +80,40 @@ func NewReplicaSet(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, 
 	return rs, err
 }
 
-func newShard(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, error) {
-	return newRs(mongod, repl, memNum, hidden, roleShardSvr)
+func newShard(name string, rp RsOption) (ReplicaSet, error) {
+	return newPureReplicaSet(name, rp, roleShardSvr, getProvider())
 }
 
-func newCfgsvr(mongod, repl string, memNum uint8, hidden bool) (ReplicaSet, error) {
-	return newRs(mongod, repl, memNum, hidden, roleConfigSvr)
-}
-
-func newRs(mongod, repl string, memNum uint8, hidden bool, role mongodRole) (ReplicaSet, error) {
-	if hidden {
-		return newReplicaSetWithHidden(mongod, repl, memNum, role, getProvider())
-	} else {
-		return newPureReplicaSet(mongod, repl, memNum, role, getProvider())
-	}
+func newCfgsvr(name string, rp RsOption) (ReplicaSet, error) {
+	return newPureReplicaSet(name, rp, roleConfigSvr, getProvider())
 }
 
 type pureReplicaSet struct {
 	replName string
 	members  []HostAndPort
+	seeds    []HostAndPort
 	provider mongoProvider
+	options  []MongodOption
 }
 
 var _ ReplicaSet = (*pureReplicaSet)(nil)
 
-func newPureReplicaSet(mongod, repl string, memNum uint8, role mongodRole, p mongoProvider) (
+func newPureReplicaSet(repl string, rp RsOption, role mongodRole, p mongoProvider) (
 	*pureReplicaSet, error) {
 	r := &pureReplicaSet{
 		replName: repl,
 		members:  make([]HostAndPort, 0),
 		provider: p,
+		options:  rp.Members,
 	}
 
-	replDbDir := fmt.Sprintf("/tmp/dbfiles-%s", r.replName)
-	err := os.Mkdir(replDbDir, os.ModePerm)
+	replDbDir := path.Join(defaultDbPathPrefix, "mongobox-"+r.replName)
+	err := os.MkdirAll(replDbDir, os.ModePerm)
 	if err != nil {
 		return nil, errors.Wrapf(err, "mkdir for %s error", replDbDir)
 	}
 
-	for i := 0; i < int(memNum); i++ {
+	for _, mem := range rp.Members {
 		for !sys.PortIsAvailable(startPort) {
 			startPort += 2
 		}
@@ -79,9 +124,9 @@ func newPureReplicaSet(mongod, repl string, memNum uint8, role mongodRole, p mon
 			return nil, errors.Wrapf(err, "mkdir for %s error", replDbDir)
 		}
 		logFile := path.Join(replDbDir, fmt.Sprintf("mongod-%d.log", startPort))
-		err = r.provider.StartMongod(mongod, r.replName, dbPath, logFile, startPort, role)
+		err = r.provider.StartMongod(mem.Mongod, r.replName, dbPath, logFile, rp.Keyfile, startPort, role)
 		if err != nil {
-			return nil, errors.WithMessagef(err, "newMongod for %s error", repl)
+			return nil, errors.WithMessagef(err, "newMongod for %s error", r.replName)
 		}
 		r.members = append(r.members, HostAndPort{"127.0.0.1", startPort})
 		startPort++
@@ -96,6 +141,14 @@ func (r *pureReplicaSet) generateRsConf() bson.D {
 		membConfig := bson.D{
 			{"_id", i},
 			{"host", memb.Address()},
+		}
+
+		if r.options[i].Hidden {
+			// set it as hidden
+			membConfig = append(membConfig, bson.E{"priority", 0})
+			membConfig = append(membConfig, bson.E{"hidden", true})
+		} else {
+			r.seeds = append(r.seeds, memb)
 		}
 
 		members = append(members, membConfig)
@@ -126,82 +179,5 @@ func (r *pureReplicaSet) Members() []HostAndPort {
 }
 
 func (r *pureReplicaSet) ConnString() string {
-	return ConnStringForRs(r.replName, r.members)
-}
-
-type replicaSetWithHidden struct {
-	*pureReplicaSet
-	seeds []HostAndPort
-}
-
-var _ ReplicaSet = (*replicaSetWithHidden)(nil)
-
-func newReplicaSetWithHidden(mongod, repl string, memNum uint8, role mongodRole, p mongoProvider) (
-	*replicaSetWithHidden, error) {
-	if memNum < 3 {
-		return nil, errors.New("members number should greate than 3 if setting hidden")
-	}
-
-	pr, err := newPureReplicaSet(mongod, repl, memNum, role, p)
-	if err != nil {
-		return nil, err
-	}
-	r := &replicaSetWithHidden{
-		pureReplicaSet: pr,
-		seeds:          make([]HostAndPort, 0),
-	}
-
-	for i := 0; i < int(memNum); i++ {
-		if i != int(memNum) {
-			r.seeds = append(r.seeds, r.members[i])
-		}
-	}
-
-	return r, nil
-}
-
-func (r *replicaSetWithHidden) generateRsConf() bson.D {
-	members := bson.A{}
-	for i, memb := range r.members {
-		membConfig := bson.D{
-			{"_id", i},
-			{"host", memb.Address()},
-		}
-
-		isSeed := false
-		for _, seed := range r.seeds {
-			if memb == seed {
-				isSeed = true
-				break
-			}
-		}
-
-		if !isSeed {
-			// set it as hidden
-			membConfig = append(membConfig, bson.E{"priority", 0})
-			membConfig = append(membConfig, bson.E{"hidden", true})
-		}
-
-		members = append(members, membConfig)
-	}
-
-	config := bson.D{
-		{"_id", r.replName},
-		{"members", members},
-	}
-
-	return config
-}
-
-func (r *replicaSetWithHidden) Init() error {
-	cli, err := mongo.ConnectServer(r.members[0].Address())
-	if err != nil {
-		return err
-	}
-	defer cli.Close()
-	return cli.RsInit(context.Background(), r.generateRsConf())
-}
-
-func (r *replicaSetWithHidden) ConnString() string {
-	return ConnStringForRs(r.RsName(), r.seeds)
+	return ConnStringForRs(r.replName, r.seeds)
 }

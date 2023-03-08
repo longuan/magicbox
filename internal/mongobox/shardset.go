@@ -3,12 +3,36 @@ package mongobox
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
 
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+const MaxShardNum = 16
+
+type ShardSetOption struct {
+	ConfigSvrOption RsOption
+	ShardOptions    []RsOption
+	MongosOption    []MongosOption
+}
+
+func (sso ShardSetOption) validate() error {
+	if len(sso.MongosOption) == 0 {
+		return errors.New("at least one mongos")
+	}
+	if len(sso.ShardOptions) > MaxShardNum {
+		return fmt.Errorf("excced max shard num %d", MaxShardNum)
+	}
+	return nil
+}
+
+type MongosOption struct {
+	Mongos string
+}
 
 type ShardSet struct {
 	mongoss   []HostAndPort
@@ -18,7 +42,11 @@ type ShardSet struct {
 }
 
 // NewShardSet 创建一个分片集群
-func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum uint8, hidden bool) (*ShardSet, error) {
+func NewShardSet(name string, shardSetOption ShardSetOption) (*ShardSet, error) {
+	err := shardSetOption.validate()
+	if err != nil {
+		return nil, err
+	}
 	ss := &ShardSet{
 		mongoss:  make([]HostAndPort, 0),
 		shards:   make([]ReplicaSet, 0),
@@ -26,8 +54,8 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	}
 
 	// 创建configsvrs
-	replName := genCfgName(clsName)
-	configRs, err := newCfgsvr(mongod, replName, mongodNum, hidden)
+	replName := genCfgName(name)
+	configRs, err := newCfgsvr(replName, shardSetOption.ConfigSvrOption)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "new cfgsvr %s error", replName)
 	}
@@ -38,8 +66,14 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	}
 
 	// 启动mongos
-	for i := 0; i < int(mongosNum); i++ {
-		err = ss.provider.StartMongos(mongos, replName, configRs.Members(), startPort)
+	mongosDir := path.Join(defaultDbPathPrefix, "mongobox-mongos")
+	err = os.MkdirAll(mongosDir, os.ModePerm)
+	if err != nil {
+		return nil, errors.Wrapf(err, "mkdir for %s error", mongosDir)
+	}
+	for _, mongosOption := range shardSetOption.MongosOption {
+		logFile := path.Join(mongosDir, fmt.Sprintf("mongos-%d.log", startPort))
+		err = ss.provider.StartMongos(mongosOption.Mongos, replName, logFile, configRs.Members(), startPort)
 		if err != nil {
 			return nil, errors.WithMessage(err, "creating mongos error")
 		}
@@ -58,9 +92,9 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 	}
 	defer cli.Disconnect(context.Background())
 
-	for i := 0; i < int(shardNum); i++ {
-		replName := genRsName(clsName, uint8(i))
-		rs, err := newShard(mongod, replName, mongodNum, hidden)
+	for i, shardOption := range shardSetOption.ShardOptions {
+		replName := genRsName(name, uint8(i))
+		rs, err := newShard(replName, shardOption)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "new shard %s error", replName)
 		}
@@ -75,6 +109,7 @@ func NewShardSet(mongos, mongod, clsName string, shardNum, mongosNum, mongodNum 
 		}
 		ss.shards = append(ss.shards, rs)
 	}
+
 	return ss, nil
 }
 
@@ -101,4 +136,19 @@ func genRsName(cls string, i uint8) string {
 
 func genCfgName(cls string) string {
 	return fmt.Sprintf("%s-cfgsvr", cls)
+}
+
+func checkRsName(rsName, clusterName string) bool {
+	if rsName == clusterName {
+		return true
+	}
+	if rsName == genCfgName(clusterName) {
+		return true
+	}
+	for i := 0; i < MaxShardNum; i++ {
+		if rsName == genRsName(clusterName, uint8(i)) {
+			return true
+		}
+	}
+	return false
 }
