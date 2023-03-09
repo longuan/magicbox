@@ -36,26 +36,26 @@ type MongosOption struct {
 
 type ShardSet struct {
 	mongoss   []HostAndPort
-	configsvr ReplicaSet
-	shards    []ReplicaSet
+	configsvr *pureReplicaSet
+	shards    []*pureReplicaSet
 	provider  mongoProvider
 }
 
 // NewShardSet 创建一个分片集群
-func NewShardSet(name string, shardSetOption ShardSetOption) (*ShardSet, error) {
+func NewShardSet(name, keyfile string, shardSetOption ShardSetOption) (*ShardSet, error) {
 	err := shardSetOption.validate()
 	if err != nil {
 		return nil, err
 	}
 	ss := &ShardSet{
 		mongoss:  make([]HostAndPort, 0),
-		shards:   make([]ReplicaSet, 0),
+		shards:   make([]*pureReplicaSet, 0),
 		provider: getProvider(),
 	}
 
 	// 创建configsvrs
 	replName := genCfgName(name)
-	configRs, err := newCfgsvr(replName, shardSetOption.ConfigSvrOption)
+	configRs, err := newCfgsvr(replName, keyfile, shardSetOption.ConfigSvrOption)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "new cfgsvr %s error", replName)
 	}
@@ -73,7 +73,7 @@ func NewShardSet(name string, shardSetOption ShardSetOption) (*ShardSet, error) 
 	}
 	for _, mongosOption := range shardSetOption.MongosOption {
 		logFile := path.Join(mongosDir, fmt.Sprintf("mongos-%d.log", startPort))
-		err = ss.provider.StartMongos(mongosOption.Mongos, replName, logFile, configRs.Members(), startPort)
+		err = ss.provider.StartMongos(mongosOption.Mongos, replName, logFile, keyfile, configRs.Seeds(), startPort)
 		if err != nil {
 			return nil, errors.WithMessage(err, "creating mongos error")
 		}
@@ -94,7 +94,7 @@ func NewShardSet(name string, shardSetOption ShardSetOption) (*ShardSet, error) 
 
 	for i, shardOption := range shardSetOption.ShardOptions {
 		replName := genRsName(name, uint8(i))
-		rs, err := newShard(replName, shardOption)
+		rs, err := newShard(replName, keyfile, shardOption)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "new shard %s error", replName)
 		}

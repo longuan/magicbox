@@ -17,7 +17,6 @@ import (
 const defaultDbPathPrefix = "/tmp"
 
 type RsOption struct {
-	Keyfile string
 	Members []MongodOption
 }
 
@@ -57,14 +56,7 @@ func (mo MongodOption) Dup() MongodOption {
 	return mo
 }
 
-type ReplicaSet interface {
-	Init() error
-	RsName() string
-	Members() []HostAndPort
-	ConnString() string
-}
-
-func NewReplicaSet(repl string, rp RsOption) (ReplicaSet, error) {
+func NewReplicaSet(repl, keyfile string, rp RsOption) (*pureReplicaSet, error) {
 	if repl == "" {
 		return nil, errors.New("repl should be empty")
 	}
@@ -72,7 +64,7 @@ func NewReplicaSet(repl string, rp RsOption) (ReplicaSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	rs, err := newPureReplicaSet(repl, rp, roleReplica, getProvider())
+	rs, err := newPureReplicaSet(repl, keyfile, rp, roleReplica, getProvider())
 	if err != nil {
 		return nil, errors.WithMessage(err, "new rs")
 	}
@@ -80,12 +72,12 @@ func NewReplicaSet(repl string, rp RsOption) (ReplicaSet, error) {
 	return rs, err
 }
 
-func newShard(name string, rp RsOption) (ReplicaSet, error) {
-	return newPureReplicaSet(name, rp, roleShardSvr, getProvider())
+func newShard(name, keyfile string, rp RsOption) (*pureReplicaSet, error) {
+	return newPureReplicaSet(name, keyfile, rp, roleShardSvr, getProvider())
 }
 
-func newCfgsvr(name string, rp RsOption) (ReplicaSet, error) {
-	return newPureReplicaSet(name, rp, roleConfigSvr, getProvider())
+func newCfgsvr(name, keyfile string, rp RsOption) (*pureReplicaSet, error) {
+	return newPureReplicaSet(name, keyfile, rp, roleConfigSvr, getProvider())
 }
 
 type pureReplicaSet struct {
@@ -96,9 +88,7 @@ type pureReplicaSet struct {
 	options  []MongodOption
 }
 
-var _ ReplicaSet = (*pureReplicaSet)(nil)
-
-func newPureReplicaSet(repl string, rp RsOption, role mongodRole, p mongoProvider) (
+func newPureReplicaSet(repl, keyfile string, rp RsOption, role mongodRole, p mongoProvider) (
 	*pureReplicaSet, error) {
 	r := &pureReplicaSet{
 		replName: repl,
@@ -124,7 +114,7 @@ func newPureReplicaSet(repl string, rp RsOption, role mongodRole, p mongoProvide
 			return nil, errors.Wrapf(err, "mkdir for %s error", replDbDir)
 		}
 		logFile := path.Join(replDbDir, fmt.Sprintf("mongod-%d.log", startPort))
-		err = r.provider.StartMongod(mem.Mongod, r.replName, dbPath, logFile, rp.Keyfile, startPort, role)
+		err = r.provider.StartMongod(mem.Mongod, r.replName, dbPath, logFile, keyfile, startPort, role)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "newMongod for %s error", r.replName)
 		}
@@ -176,6 +166,10 @@ func (r *pureReplicaSet) RsName() string {
 
 func (r *pureReplicaSet) Members() []HostAndPort {
 	return r.members // TODO: return a copy
+}
+
+func (r *pureReplicaSet) Seeds() []HostAndPort {
+	return r.seeds // TODO: return a copy
 }
 
 func (r *pureReplicaSet) ConnString() string {

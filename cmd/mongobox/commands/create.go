@@ -61,7 +61,6 @@ create test-cls -s --shard 2
 		}
 
 		defaultRsOption := mongobox.RsOption{
-			Keyfile: keyfile,
 			Members: make([]mongobox.MongodOption, 0),
 		}
 		for i := 0; uint8(i) < member; i++ {
@@ -83,13 +82,13 @@ create test-cls -s --shard 2
 			ssoOption.MongosOption = append(ssoOption.MongosOption, mongobox.MongosOption{
 				Mongos: mongos,
 			})
-			_, err = mongobox.NewShardSet(args[0], ssoOption)
+			_, err = mongobox.NewShardSet(args[0], keyfile, ssoOption)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 		} else {
-			_, err = mongobox.NewReplicaSet(args[0], defaultRsOption.Dup())
+			_, err = mongobox.NewReplicaSet(args[0], keyfile, defaultRsOption.Dup())
 			if err != nil {
 				fmt.Println(err)
 				return

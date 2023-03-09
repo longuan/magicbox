@@ -36,6 +36,7 @@ func defaultMongosFlagSet() *pflag.FlagSet {
 	flagset.Int("port", 0, "")
 	flagset.String("logpath", "", "")
 	flagset.Bool("fork", true, "")
+	flagset.String("keyFile", "", "key file path")
 
 	return flagset
 }
@@ -95,13 +96,14 @@ func (l *localProcessProvider) StartMongod(binaryPath, rsName, dbPath, logFile, 
 }
 
 // StartMongos 创建一个本地的mongos进程
-func (l *localProcessProvider) StartMongos(binaryPath, configRs, logFile string, configs []HostAndPort, port uint16) error {
+func (l *localProcessProvider) StartMongos(binaryPath, configRs, logFile, keyfile string, configs []HostAndPort, port uint16) error {
 	flagset := defaultMongosFlagSet()
 	flagset.Set("configdb", ConnStringForRs(configRs, configs))
 	flagset.Set("port", fmt.Sprintf("%d", port))
 	flagset.Set("logpath", logFile)
 	flagset.Set("fork", "true")
 	flagset.Set("bind_ip_all", "true")
+	flagset.Set("keyFile", keyfile)
 
 	args := convertToArgs(flagset)
 	err := sys.NewProcess(binaryPath, args)
@@ -120,6 +122,7 @@ func (l *localProcessProvider) StopMongod(cluster string) error {
 		return fmt.Errorf("cannot find mongod belong to [%s]", cluster)
 	}
 
+	// TODO: 并行删除
 	for _, pid := range pids {
 		getCmdlineCmd := fmt.Sprintf("ps -p %d -o cmd=", pid)
 		out, err := sys.RunCommand(getCmdlineCmd)
@@ -144,7 +147,7 @@ func (l *localProcessProvider) StopMongod(cluster string) error {
 		}
 
 		fmt.Printf("will stop process %d [%s]\n", pid, cmdline)
-		waitCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		err = sys.StopProcess(waitCtx, pid)
 		if err != nil {

@@ -39,7 +39,7 @@ func StopProcess(ctx context.Context, pid int) error {
 		time.Sleep(time.Second)
 		select {
 		case <-ctx.Done():
-			return errors.Errorf("context done %s with last error %s", ctx.Err(), err)
+			return errors.Errorf("context done %s with last error %v", ctx.Err(), err)
 		default:
 			p, _ := os.FindProcess(pid)
 			// If sig is 0, then no signal is sent,
