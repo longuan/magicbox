@@ -46,6 +46,14 @@ func (s *server) RsInit(ctx context.Context, config interface{}) error {
 	return nil
 }
 
+func (s *server) AddShard(ctx context.Context, shard string) error {
+	result := s.cli.Database("admin").RunCommand(ctx, bson.M{"addShard": shard})
+	if result.Err() != nil {
+		return errors.Wrapf(result.Err(), "addShard error shard is %s", shard)
+	}
+	return nil
+}
+
 func (s *server) Close() {
 	if s.cli != nil {
 		s.cli.Disconnect(context.Background())

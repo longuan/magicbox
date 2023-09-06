@@ -1,38 +1,36 @@
 package mongobox
 
-var startPort uint16 = 45000
+import "github.com/longuan/magicbox/pkg/sys"
+
+var startingPort uint16 = 6666
+
+func allocatePort() uint16 {
+	startingPort++
+	for !sys.PortIsAvailable(startingPort) {
+		if startingPort > 65535 {
+			startingPort = 6666
+		}
+		startingPort++
+	}
+	return startingPort
+}
 
 type mongodRole uint8
 
 const (
-	roleUnknown mongodRole = iota
-	roleStandAlone
-	roleConfigSvr
+	roleConfigSvr mongodRole = iota + 1
 	roleShardSvr
 	roleReplica
 )
 
-type mongoProvider interface {
-	StartMongod(binaryPath, rsName, dbPath, logFile, keyfile string, port uint16, role mongodRole) error
-	StartMongos(binaryPath, configRs, logFile, keyfile string, configs []HostAndPort, port uint16) error
-	StopMongod(cluster string) error
-	StopMongos(cluster string) error
-}
-
-func DestroyCluster(name string) error {
-	provider := getProvider()
-	err := provider.StopMongod(name)
-	if err != nil {
-		return err
+func (r mongodRole) String() string {
+	if r == roleConfigSvr {
+		return "configsvr"
+	} else if r == roleShardSvr {
+		return "shardsvr"
+	} else if r == roleReplica {
+		return "replica"
+	} else {
+		return "unknown"
 	}
-	err = provider.StopMongos(name)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func getProvider() mongoProvider {
-	// 目前只有localProcessProvider
-	return &localProcessProvider{}
 }

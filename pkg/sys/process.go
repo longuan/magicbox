@@ -2,8 +2,11 @@ package sys
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,4 +55,26 @@ func StopProcess(ctx context.Context, pid int) error {
 			}
 		}
 	}
+}
+
+func GetAllPid(pattern string) ([]int, error) {
+	getPidCmd := fmt.Sprintf("ps -ef | awk '/[%c]%s/{print $2}'", pattern[0], pattern[1:])
+	out, err := RunCommand(getPidCmd)
+	if err != nil {
+		return nil, errors.WithMessagef(err, "run command %s error", getPidCmd)
+	}
+	outStr := strings.TrimSpace(string(out))
+	if outStr == "" {
+		return nil, errors.Errorf("there is no process belongs to [%s]", pattern)
+	}
+	pidStrs := strings.Split(outStr, "\n")
+	pids := make([]int, 0)
+	for _, s := range pidStrs {
+		p, err := strconv.Atoi(s)
+		if err != nil {
+			return nil, errors.Wrapf(err, "strconv %s error", s)
+		}
+		pids = append(pids, p)
+	}
+	return pids, nil
 }

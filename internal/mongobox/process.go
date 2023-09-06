@@ -1,12 +1,7 @@
 package mongobox
 
 import (
-	"context"
 	"fmt"
-	"path"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
@@ -25,6 +20,7 @@ func defaultMongodFlagSet() *pflag.FlagSet {
 	flagset.Bool("configsvr", false, "")
 	flagset.Bool("shardsvr", false, "")
 	flagset.String("keyFile", "", "key file path")
+	flagset.String("pidfilepath", "", "full path to pidfile")
 
 	return flagset
 }
@@ -37,6 +33,7 @@ func defaultMongosFlagSet() *pflag.FlagSet {
 	flagset.String("logpath", "", "")
 	flagset.Bool("fork", true, "")
 	flagset.String("keyFile", "", "key file path")
+	flagset.String("pidfilepath", "", "full path to pidfile")
 
 	return flagset
 }
@@ -60,175 +57,49 @@ func convertToArgs(flagset *pflag.FlagSet) []string {
 	return args
 }
 
-type localProcessProvider struct {
-}
+type localProcessModule struct{}
 
-var _ mongoProvider = (*localProcessProvider)(nil)
-
-// StartMongod 创建一个本地的mongod进程
-func (l *localProcessProvider) StartMongod(binaryPath, rsName, dbPath, logFile, keyfile string, port uint16,
-	role mongodRole) error {
-	if role == roleUnknown || role == roleStandAlone {
-		return errors.Errorf("not support")
-	}
-
+func (l localProcessModule) startMongod(rsName string, m MongodMember) error {
 	flagset := defaultMongodFlagSet()
-	flagset.Set("dbpath", dbPath)
-	flagset.Set("port", fmt.Sprintf("%d", port))
-	flagset.Set("logpath", logFile)
+	flagset.Set("dbpath", m.dataDir)
+	flagset.Set("port", fmt.Sprintf("%d", m.port))
+	flagset.Set("logpath", m.logFile)
 	flagset.Set("replSet", rsName)
 	flagset.Set("fork", "true")
 	flagset.Set("bind_ip_all", "true")
-	flagset.Set("keyFile", keyfile)
+	flagset.Set("keyFile", m.keyFile)
+	flagset.Set("pidfilepath", m.pidFile)
 
-	if role == roleConfigSvr {
+	if m.role == roleConfigSvr {
 		flagset.Set("configsvr", "true")
-	} else if role == roleShardSvr {
+	} else if m.role == roleShardSvr {
 		flagset.Set("shardsvr", "true")
+	} else if m.role != roleReplica {
+		return fmt.Errorf("%v is an invalid role", m.role)
 	}
 
 	args := convertToArgs(flagset)
-	err := sys.NewProcess(binaryPath, args)
+	err := sys.NewProcess(m.binary, args)
 	if err != nil {
-		return errors.Wrapf(err, "sys.NewProcess %s %v error", binaryPath, args)
+		return errors.Wrapf(err, "sys.NewProcess %s %v error", m.binary, args)
 	}
 	return nil
 }
 
-// StartMongos 创建一个本地的mongos进程
-func (l *localProcessProvider) StartMongos(binaryPath, configRs, logFile, keyfile string, configs []HostAndPort, port uint16) error {
+func (l localProcessModule) startMongos(m MongosMember) error {
 	flagset := defaultMongosFlagSet()
-	flagset.Set("configdb", ConnStringForRs(configRs, configs))
-	flagset.Set("port", fmt.Sprintf("%d", port))
-	flagset.Set("logpath", logFile)
+	flagset.Set("configdb", m.configs.ConnString())
+	flagset.Set("port", fmt.Sprintf("%d", m.port))
+	flagset.Set("logpath", m.logFile)
 	flagset.Set("fork", "true")
 	flagset.Set("bind_ip_all", "true")
-	flagset.Set("keyFile", keyfile)
+	flagset.Set("keyFile", m.keyFile)
+	flagset.Set("pidfilepath", m.pidFile)
 
 	args := convertToArgs(flagset)
-	err := sys.NewProcess(binaryPath, args)
+	err := sys.NewProcess(m.binary, args)
 	if err != nil {
-		return errors.Wrapf(err, "sys.NewProcess %s %v error", binaryPath, args)
+		return errors.Wrapf(err, "sys.NewProcess %s %v error", m.binary, args)
 	}
 	return nil
-}
-
-func (l *localProcessProvider) StopMongod(cluster string) error {
-	pids, err := grepForPid("--replSet " + cluster)
-	if err != nil {
-		return err
-	}
-	if len(pids) == 0 {
-		return fmt.Errorf("cannot find mongod belong to [%s]", cluster)
-	}
-
-	// TODO: 并行删除
-	for _, pid := range pids {
-		getCmdlineCmd := fmt.Sprintf("ps -p %d -o cmd=", pid)
-		out, err := sys.RunCommand(getCmdlineCmd)
-		if err != nil {
-			return errors.WithMessagef(err, "run command %s error", getCmdlineCmd)
-		}
-		cmdline := strings.TrimSpace(string(out))
-		cmdStrs := strings.Split(cmdline, " ")
-		flagset := defaultMongodFlagSet()
-		err = flagset.Parse(cmdStrs[1:])
-		if err != nil {
-			return errors.Wrapf(err, "flagset mongod parse %s error", string(out))
-		}
-
-		rsName, err := flagset.GetString("replSet")
-		if err != nil {
-			return err
-		}
-		ok := checkRsName(rsName, cluster)
-		if !ok {
-			continue
-		}
-
-		fmt.Printf("will stop process %d [%s]\n", pid, cmdline)
-		waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		err = sys.StopProcess(waitCtx, pid)
-		if err != nil {
-			return errors.WithMessagef(err, "stop process %d error", pid)
-		}
-
-		dbDir, err := flagset.GetString("dbpath")
-		if err != nil {
-			return err
-		}
-		if !path.IsAbs(dbDir) {
-			fmt.Printf("%s is not abs path, skip it\n", dbDir)
-			continue
-		}
-		fmt.Println("will remove dir ", dbDir)
-		err = sys.RemoveDir(dbDir)
-		if err != nil {
-			return err
-		}
-
-		// TODO: 删除mongodb的logpath，要考虑到mongodb的日志rotating
-	}
-
-	return nil
-}
-
-func (l *localProcessProvider) StopMongos(cluster string) error {
-	pids, err := grepForPid("--configdb " + genCfgName(cluster) + "\\/")
-	if err != nil {
-		return err
-	}
-	if len(pids) == 0 {
-		return fmt.Errorf("cannot find mongos belong to [%s]", cluster)
-	}
-
-	for _, pid := range pids {
-		getCmdlineCmd := fmt.Sprintf("ps -p %d -o cmd=", pid)
-		out, err := sys.RunCommand(getCmdlineCmd)
-		if err != nil {
-			return errors.WithMessagef(err, "run command %s error", getCmdlineCmd)
-		}
-		cmdline := strings.TrimSpace(string(out))
-		cmdStrs := strings.Split(cmdline, " ")
-		flagset := defaultMongosFlagSet()
-		err = flagset.Parse(cmdStrs[1:])
-		if err != nil {
-			return errors.Wrapf(err, "flagset mongos parse %s error", string(out))
-		}
-
-		waitCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		fmt.Printf("will stop process %d [%s]\n", pid, cmdline)
-		err = sys.StopProcess(waitCtx, pid)
-		if err != nil {
-			return errors.WithMessagef(err, "stop process %d error", pid)
-		}
-
-		// TODO: 删除mongodb的logpath，要考虑到mongodb的日志rotating
-	}
-
-	return nil
-}
-
-func grepForPid(pattern string) ([]int, error) {
-	getPidCmd := fmt.Sprintf("ps -ef | awk '/[%c]%s/{print $2}'", pattern[0], pattern[1:])
-	out, err := sys.RunCommand(getPidCmd)
-	if err != nil {
-		return nil, errors.WithMessagef(err, "run command %s error", getPidCmd)
-	}
-	outStr := strings.TrimSpace(string(out))
-	if outStr == "" {
-		return nil, errors.Errorf("there is no mongodb processes belong to [%s]", pattern)
-	}
-	pidStrs := strings.Split(outStr, "\n")
-	pids := make([]int, 0)
-	for _, s := range pidStrs {
-		p, err := strconv.Atoi(s)
-		if err != nil {
-			return nil, errors.Wrapf(err, "strconv %s error", s)
-		}
-		pids = append(pids, p)
-	}
-	return pids, nil
 }
