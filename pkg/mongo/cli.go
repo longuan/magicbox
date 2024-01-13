@@ -21,13 +21,10 @@ func NewServer(cli *mongo.Client) *server {
 
 func ConnectServer(addr string, opts ...*options.ClientOptions) (*server, error) {
 	cliOpts := options.Client().SetHosts([]string{addr}).SetDirect(true)
-	cli, err := mongo.NewClient(cliOpts)
+
+	cli, err := mongo.Connect(context.Background(), cliOpts)
 	if err != nil {
-		return nil, errors.Wrap(err, "mongo.NewClient error")
-	}
-	err = cli.Connect(context.Background())
-	if err != nil {
-		return nil, errors.Wrap(err, "cli.Connect error")
+		return nil, errors.Wrap(err, "mongo.Connect error")
 	}
 	err = cli.Ping(context.Background(), nil)
 	if err != nil {
