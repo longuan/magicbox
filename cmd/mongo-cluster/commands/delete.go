@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/longuan/magicbox/internal/mongobox"
+	"github.com/longuan/magicbox/internal/cluster"
 )
 
 func init() {
@@ -18,7 +18,7 @@ var DeleteCmd = cobra.Command{
 	Short: "delete a MongoDB cluster",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		manager := mongobox.NewNativeClusterManager(destdir)
+		manager := cluster.NewNativeClusterManager(destdir)
 		err := manager.Delete(context.Background(), args[0])
 		if err != nil {
 			fmt.Println(err)

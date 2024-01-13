@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/longuan/magicbox/internal/mongobox"
+	"github.com/longuan/magicbox/internal/cluster"
 )
 
 var (
@@ -43,8 +43,8 @@ var CreateCmd = cobra.Command{
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		if isShardSet {
-			opt := mongobox.CreateShardSetOption{
-				CreateReplicaSetOption: mongobox.CreateReplicaSetOption{
+			opt := cluster.CreateShardSetOption{
+				CreateReplicaSetOption: cluster.CreateReplicaSetOption{
 					MemNum:     uint32(memberNum),
 					MongodFile: mongodFile,
 					Hidden:     uint32(hiddenNum),
@@ -55,21 +55,21 @@ var CreateCmd = cobra.Command{
 				MongosNum:  uint32(mongosNum),
 			}
 
-			manager := mongobox.NewNativeClusterManager(destdir)
+			manager := cluster.NewNativeClusterManager(destdir)
 			_, err := manager.CreateSS(context.Background(), args[0], &opt)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 		} else {
-			opt := mongobox.CreateReplicaSetOption{
+			opt := cluster.CreateReplicaSetOption{
 				MemNum:     uint32(memberNum),
 				MongodFile: mongodFile,
 				Hidden:     uint32(hiddenNum),
 				KeyFile:    keyFile,
 			}
 
-			manager := mongobox.NewNativeClusterManager(destdir)
+			manager := cluster.NewNativeClusterManager(destdir)
 			_, err := manager.CreateRS(context.Background(), args[0], &opt)
 			if err != nil {
 				fmt.Println(err)

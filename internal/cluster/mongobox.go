@@ -1,4 +1,4 @@
-package mongobox
+package cluster
 
 import "github.com/longuan/magicbox/pkg/sys"
 

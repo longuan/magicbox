@@ -1,4 +1,4 @@
-package mongobox
+package cluster
 
 type CreateReplicaSetOption struct {
 	MemNum     uint32 // 节点数量

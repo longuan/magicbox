@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/longuan/magicbox/cmd/mongobox/commands"
+	"github.com/longuan/magicbox/cmd/mongo-cluster/commands"
 )
 
 var rootCmd = cobra.Command{
