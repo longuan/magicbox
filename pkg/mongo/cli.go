@@ -59,3 +59,7 @@ func (s *server) Close() {
 		s.cli.Disconnect(context.Background())
 	}
 }
+
+func (s *server) Client() *mongo.Client {
+	return s.cli
+}
