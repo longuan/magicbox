@@ -5,6 +5,7 @@ type ServerStatus struct {
 	Connections ServerStatusConnections `bson:"connections"`
 	FlowControl ServerStatusFlowControl `bson:"flowControl"`
 	GlobalLock  ServerStatusGlobalLock  `bson:"globalLock"`
+	Tcmalloc    ServerStatusTcmalloc    `bson:"tcmalloc"`
 	WiredTiger  ServerStatusWiredTiger  `bson:"wiredTiger"`
 }
 
